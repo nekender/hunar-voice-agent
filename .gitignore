@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+data/
+frontend/node_modules/
+frontend/dist/
+.pytest_cache/
+.DS_Store
