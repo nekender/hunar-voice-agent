@@ -286,9 +286,12 @@ async def sink_list(request: Request):
     return hub_of(request).store.sink_list()
 
 
+BOOTED_AT = time.time()
+
+
 @app.get("/healthz")
 async def health():
-    return {"ok": True}
+    return {"ok": True, "bootedAt": round(BOOTED_AT)}
 
 
 if FRONTEND.is_dir():
