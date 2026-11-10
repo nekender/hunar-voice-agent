@@ -142,6 +142,12 @@ class Caller:
             return sid
 
     async def talk(self, call) -> None:
+        try:
+            await self._talk(call)
+        except websockets.ConnectionClosed:
+            pass  # the agent hung up (or the call dropped); the chat side carries on
+
+    async def _talk(self, call) -> None:
         silence = bytes(FRAME)
         for pcm, text in zip(self.lines, self.texts):
             await self.wait_for_agent_turn_end()

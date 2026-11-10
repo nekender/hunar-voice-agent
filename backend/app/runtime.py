@@ -279,7 +279,12 @@ class Session:
                 return
             self.emit("chat_mode_entered", {"by": "call_end"})
             left = len([n for n in FIELDS if not self.state.is_settled(n)])
-            await self.say_in_chat(f"Thanks for the call! Just {left} more thing{'s' if left != 1 else ''} to finish here.")
+            things = f"{left} more thing{'s' if left != 1 else ''}"
+            if reason.startswith(("error", "voice provider", "server restart")):
+                await self.say_in_chat(f"Sorry, the call dropped on our side. Tap the call button to pick up where we "
+                                       f"left off, or finish the last {things} right here.")
+            else:
+                await self.say_in_chat(f"Thanks for the call! Just {things} to finish here.")
             await self._advance()
 
     async def voice_save_field(self, field: str, value: Any) -> dict[str, Any]:

@@ -221,8 +221,11 @@ class CallBridge:
                     self.end_reason = "max call length reached"
                 for t in done:
                     if t.exception() and not isinstance(t.exception(), (WebSocketDisconnect, asyncio.CancelledError)):
-                        log.error("call task %s failed: %r", t.get_name(), t.exception())
-                        self.end_reason = f"error in {t.get_name()}: {type(t.exception()).__name__}"
+                        exc = t.exception()
+                        log.error("call task %s failed: %r", t.get_name(), exc)
+                        self.end_reason = f"error in {t.get_name()}: {type(exc).__name__}"
+                        # Keep the provider's actual message (e.g. a quota or keepalive close) in the timeline.
+                        self.session.emit_soft("error", {"where": f"voice:{t.get_name()}", "message": f"{type(exc).__name__}: {str(exc)[:300]}"})
                 for t in pending:
                     t.cancel()
                 await asyncio.gather(*pending, return_exceptions=True)

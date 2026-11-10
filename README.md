@@ -233,6 +233,11 @@ mic frames, answers the chat cards, and prints the transcript, record, latencies
 - **Speech recognition on Indian place names.** "Koramangala" was once transcribed as "Mangala". The agent reads
   values back, but a misheard area the caller doesn't correct goes into the record. A locality autocomplete in chat would fix it.
 - Echo without headphones can make the agent hear itself; this relies on browser AEC.
+- **The Live preview model occasionally drops a session mid-call** (Gemini closes it with an `APIError`; seen twice
+  in testing, both at the same moment, on the free-tier key). The call ends cleanly: the chat says the call dropped
+  and offers to tap call again, which resumes with full context ("welcome back", nothing re-asked). The provider's
+  error text is recorded in the session timeline. Reconnecting the Live session transparently, without the user
+  re-dialling, is the next step.
 - No authentication: anyone with a `sessionId` can open that session. Session ids are random, the debug views
   mask Aadhaar, and file links are signed, but this is not production access control.
 - The licence check is a vision model, not a call to the Sarathi/DigiLocker APIs. It catches the wrong document,
