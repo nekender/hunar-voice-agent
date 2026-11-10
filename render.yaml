@@ -1,0 +1,19 @@
+# Render Blueprint: New > Blueprint > pick this repo. Free web service; all state lives in Neon Postgres.
+# Secrets (GEMINI_API_KEY, DATABASE_URL) are entered in the Render dashboard, never committed.
+services:
+  - type: web
+    name: hunar-delivery-agent
+    runtime: docker
+    plan: free
+    region: virginia            # same AWS region as the Neon database (us-east-1)
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: RECORD_WEBHOOK_URL
+        value: http://127.0.0.1:10000/sink/records
+      - key: INACTIVITY_SECONDS
+        value: "600"

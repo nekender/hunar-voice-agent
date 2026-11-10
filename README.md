@@ -5,7 +5,7 @@ vehicle. **In the chat on the same page** they type or upload the things that ar
 Aadhaar, bank IFSC, vehicle type and a licence photo. Both channels share one session. Every session ends in a
 single sanitized, versioned record that is POSTed to a receiving endpoint.
 
-- **Live app:** `https://<hf-user>-hunar-delivery-agent.hf.space` (each page load is a new session; add `?sessionId=…` to resume one)
+- **Live app:** `https://hunar-delivery-agent.onrender.com` (each page load is a new session; add `?sessionId=…` to resume one)
 - **Session timeline (debug view):** `/debug/<sessionId>`
 - **Received records (stub "other service"):** `/sink/records`
 - **Metrics:** `/api/metrics` (p50/p95 latency, cost per completed session)
@@ -227,6 +227,8 @@ mic frames, answers the chat cards, and prints the transcript, record, latencies
   routing by `sessionId` or Postgres advisory locks.
 - **Database calls are synchronous** (a few ms each to Neon in the same region). That's fine for this load, but the
   first query after Neon's idle auto-suspend takes about 1 s while compute wakes.
+- **Free hosting sleeps.** Render's free tier spins down after 15 idle minutes (an uptime ping prevents it). While
+  asleep, the inactivity timeout can't fire; `partial` records for those sessions are produced on the next boot.
 - **Speech recognition on Indian place names.** "Koramangala" was once transcribed as "Mangala". The agent reads
   values back, but a misheard area the caller doesn't correct goes into the record. A locality autocomplete in chat would fix it.
 - Echo without headphones can make the agent hear itself; this relies on browser AEC.
@@ -290,17 +292,19 @@ cd backend && ../.venv/bin/uvicorn app.main:app --port 8080   # open http://loca
 | `GET /api/metrics` | latency p50/p95, cost per completed session |
 | `GET /sink/records` | what the receiving service got |
 
-### Deploying (free: Hugging Face Spaces + Neon)
-The app host is a **Hugging Face Docker Space** (free, HTTPS, WebSockets; it only sleeps after ~48 h without
-traffic). It has no persistent disk, so **all state lives in Neon Postgres** (free tier, same AWS region). That
-covers the event log, record outbox, uploaded files and the link-signing key, which makes a Space restart or
-redeploy lossless by construction.
-```bash
-# .env: GEMINI_API_KEY, DATABASE_URL (Neon, direct, non-pooled host), HF_TOKEN (write)
-set -a && . ./.env && set +a
-.venv/bin/python scripts/deploy_hf.py      # creates the Space, sets secrets, uploads git-tracked files
-```
-`fly.toml` is kept for an alternative Fly.io deploy (one machine + volume, no DATABASE_URL needed).
+### Deploying (free: Render + Neon)
+The app host is a **Render free web service** (Docker, HTTPS, WebSockets). Free instances have no persistent disk
+and sleep after 15 minutes without traffic, so **all state lives in Neon Postgres** (free tier, same AWS region,
+us-east-1). That covers the event log, record outbox, uploaded files and the link-signing key, so a sleep, restart
+or redeploy loses nothing. On boot, the outbox retries undelivered records and the sweeper closes sessions that
+went idle while the instance was asleep. A free uptime monitor pings `/healthz` so reviewers don't hit a cold start.
+
+1. Render dashboard → **New → Blueprint** → this repo (`render.yaml`).
+2. Enter `GEMINI_API_KEY` and `DATABASE_URL` (Neon, direct non-pooled host) when prompted. They're stored as Render secrets.
+3. Optional: an UptimeRobot HTTP monitor on `https://<service>.onrender.com/healthz` every 5–10 minutes.
+
+`fly.toml` is kept for an alternative deploy on Fly.io (one machine + a volume, SQLite, no DATABASE_URL needed).
+Hugging Face Spaces was the first free choice, but Docker Spaces now require a paid plan.
 
 ### Code map
 ```

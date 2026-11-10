@@ -2,4 +2,3 @@
 pytest
 pytest-asyncio
 pillow  # scripts/sim_call.py renders a synthetic licence
-huggingface_hub  # scripts/deploy_hf.py

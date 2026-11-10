@@ -15,10 +15,10 @@ COPY backend/requirements.txt backend/requirements.txt
 RUN pip install -r backend/requirements.txt
 COPY backend/app backend/app
 COPY --from=web /web/dist frontend/dist
-# Hugging Face Spaces runs containers as uid 1000.
 RUN useradd --uid 1000 app
 USER app
 WORKDIR /app/backend
 EXPOSE 8080
+# Hosts that inject $PORT (Render) are honoured; 8080 otherwise.
 # One worker on purpose: live sessions and the per-session locks are in-process (see README limitations).
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers", "--forwarded-allow-ips", "*"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --proxy-headers --forwarded-allow-ips '*'"]
