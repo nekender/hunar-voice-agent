@@ -311,7 +311,7 @@ class CallBridge:
             self.agent_audio_s = 0.0
             if self.user_turn_open and self.last_voice_at:
                 gap_ms = (now - self.last_voice_at) * 1000
-                if 0 < gap_ms < 10000:
+                if 150 < gap_ms < 10000:  # <150 ms means mic bleed/echo, not a turn
                     self.session.record_latency(gap_ms)
             self.user_turn_open = False
         self.agent_audio_s += len(data) / 2 / OUT_RATE
@@ -388,6 +388,7 @@ class CallBridge:
             if time.monotonic() - self.last_voice_at < QUIET_BEFORE_NOTE_S:
                 continue
             batch, self.notes = self.notes, []
+            self.user_turn_open = False  # the reply that follows answers the note, not the caller
             await self.live.send_realtime_input(text="\n".join(batch))
 
     # cost -----------------------------------------------------------------------------------------------------

@@ -157,10 +157,14 @@ class Session:
                 )
                 return
             await self._close(request_id)
-            await self.tell_call(f"[chat] The user just submitted {field} in chat and it is valid ({display}). "
-                                 "Acknowledge it briefly at a natural moment; don't ask for it again.")
             if field == "drivingLicence":
+                # Don't let the agent say "got it" before the vision check has had its say.
+                await self.tell_call("[chat] The user uploaded their licence photo; it's being checked. Say you've "
+                                     "received it and are checking it; you'll get another note if it's a problem.")
                 self._start_licence_check(result.value)
+            else:
+                await self.tell_call(f"[chat] The user just submitted {field} in chat and it is valid ({display}). "
+                                     "Acknowledge it briefly at a natural moment; don't ask for it again.")
             await self._advance()
 
     async def api_submit(self, field: str, value: Any) -> dict[str, Any]:
