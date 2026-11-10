@@ -20,7 +20,8 @@ class Settings:
     voice_name: str = field(default_factory=lambda: os.environ.get("VOICE_NAME", "Kore"))
 
     # Postgres (e.g. Neon) when set; otherwise SQLite under data_dir. DB_SCHEMA isolates test runs.
-    database_url: str = field(default_factory=lambda: os.environ.get("DATABASE_URL", ""))
+    # Stray quotes/whitespace (copied from a .env file into a dashboard) are stripped rather than failing.
+    database_url: str = field(default_factory=lambda: os.environ.get("DATABASE_URL", "").strip().strip("'\"").strip())
     db_schema: str = field(default_factory=lambda: os.environ.get("DB_SCHEMA", ""))
     data_dir: Path = field(default_factory=lambda: Path(os.environ.get("DATA_DIR", "./data")).resolve())
     public_base_url: str = field(default_factory=lambda: os.environ.get("PUBLIC_BASE_URL", "").rstrip("/"))

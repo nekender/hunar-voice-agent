@@ -119,15 +119,25 @@ class Store:
         self._lock = threading.Lock()
         self.postgres = bool(database_url)
         if self.postgres:
+            from psycopg.conninfo import conninfo_to_dict
             from psycopg.rows import dict_row
             from psycopg_pool import ConnectionPool
+
+            # Validate up front: an unparseable URL would otherwise make the pool retry forever and log the
+            # whole connection string, password included. This error never contains the URL.
+            try:
+                conninfo_to_dict(database_url)
+            except Exception as exc:
+                raise RuntimeError(f"DATABASE_URL is not a valid Postgres URL ({type(exc).__name__}); "
+                                   "check for quotes or pasted extra text") from None
 
             options = f"-c search_path={schema}" if schema else ""
             # check= validates a connection before handing it out: Neon suspends idle compute and drops sockets.
             self._pool = ConnectionPool(
-                database_url, min_size=1, max_size=2, open=True, check=ConnectionPool.check_connection,
+                database_url, min_size=1, max_size=2, open=False, check=ConnectionPool.check_connection,
                 kwargs={"row_factory": dict_row, "options": options} if options else {"row_factory": dict_row},
             )
+            self._pool.open(wait=True, timeout=30)  # fail the boot clearly instead of retrying in the background
             if schema:
                 with self._pool.connection() as conn:
                     conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
