@@ -5,7 +5,7 @@ vehicle. **In the chat on the same page** they type or upload the things that ar
 Aadhaar, bank IFSC, vehicle type and a licence photo. Both channels share one session. Every session ends in a
 single sanitized, versioned record that is POSTed to a receiving endpoint.
 
-- **Live app:** `https://hunar-delivery-agent.onrender.com` (each page load is a new session; add `?sessionId=…` to resume one)
+- **Live app:** `https://hunar-voice-agent.onrender.com` (each page load is a new session; add `?sessionId=…` to resume one)
 - **Session timeline (debug view):** `/debug/<sessionId>`
 - **Received records (stub "other service"):** `/sink/records`
 - **Metrics:** `/api/metrics` (p50/p95 latency, cost per completed session)
@@ -165,7 +165,7 @@ with built-in VAD, barge-in and transcription in both directions. Its input and 
 out) match the starter exactly, so there's no resampling. It speaks Hindi and Kannada and is among the cheapest
 realtime options. The browser only ever talks to my server, so the key never leaves it. A STT→LLM→TTS pipeline
 would give finer control and maybe lower cost, but needs much more work to get barge-in and latency right.
-**Cost per completed session: about $0.06** (measured on production: mean $0.055, across simulated sessions of 1.5–2 min). That's
+**Cost per completed session: about $0.06** (measured on production: $0.050–0.066, mean $0.060, over three completed 1.5–2 min sessions). That's
 summed from Gemini's per-turn `usage_metadata` by modality at list prices: audio $3/$12 per 1M tokens in/out,
 text $0.75/$4.50. The vision check adds well under $0.001. A long, meandering 6-minute real call cost $0.24,
 because Live re-bills the accumulated context every turn.
@@ -178,6 +178,7 @@ answering an injected chat note are excluded, since nobody spoke. `/api/metrics`
 
 | | p50 | p95 | turns |
 |---|---|---|---|
+| **Production (Render, Virginia), simulated caller** | **1.8 s** | **2.0 s** | 8 |
 | Earlier deploy (Fly.io, Singapore), simulated caller | 1.4 s | 2.1 s | 8 |
 | Local (India → Google), simulated caller | 2.0 s | 4.0 s | 11 |
 
