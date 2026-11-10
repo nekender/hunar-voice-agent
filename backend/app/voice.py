@@ -13,6 +13,7 @@ import asyncio
 import base64
 import logging
 import math
+import re
 import time
 import uuid
 from typing import Any
@@ -30,7 +31,11 @@ log = logging.getLogger("voice")
 MIC_RATE = 16000
 OUT_RATE = 24000
 SPEECH_RMS = 700  # PCM16 RMS above this counts as the user talking (headset mic, normal voice)
-QUIET_BEFORE_NOTE_S = 0.8  # wait for this much silence on both sides before injecting a chat note
+QUIET_BEFORE_NOTE_S = 0.8
+# The native-audio model occasionally verbalizes tool-call syntax; keep it out of transcripts and the log.
+TOOL_LEAK = re.compile(
+    r"[\w:]*(?:save_field|request_in_chat|flag_for_review|opt_out|end_call)(?:\{(?:\w+:[\w\-]+,?)*(?:value|field|reason)?\}?)?"
+)  # wait for this much silence on both sides before injecting a chat note
 
 PERSONA = """You are Asha, a friendly recruiter at Hunar.ai, on a phone call helping someone apply for a
 delivery-partner job (two-wheeler or bicycle deliveries for food/grocery/parcel apps in Indian cities).
@@ -44,13 +49,15 @@ How you talk:
 
 What you must collect:
 - On the call, conversationally: {call_fields}.
-- In the chat (they're awkward to say aloud): {chat_fields}. Early in the call, right after your first question,
-  call request_in_chat with ALL the still-needed chat fields at once and tell the caller you've sent a few things
-  to their chat that they can fill whenever convenient while you keep talking. Never ask them to read their
-  Aadhaar number aloud. If they start reading out an ID, gently point them to the chat instead.
+- In the chat (they're awkward to say aloud): {chat_fields}. The app has ALREADY sent these to the caller's chat
+  as the call started. In your first turn, tell them a few short things are waiting in their chat to fill
+  whenever convenient while you keep talking. Use request_in_chat only to re-send something. Never ask them to
+  read their Aadhaar number aloud; if they start reading out an ID, gently point them to the chat instead.
 - alternatePhone is optional; it's sent to the chat, skipping is fine.
 
 Rules:
+- Never say tool names, field names or anything in braces out loud.
+- Ask exactly one question per turn.
 - Call save_field as soon as you hear an answer; if it returns an error, explain kindly and ask again.
   Confirm numbers back briefly ("two years, got it").
 - Messages starting with [chat] or [system] come from the app, not the caller. React briefly at a natural moment
@@ -59,8 +66,11 @@ Rules:
 - Call flag_for_review (and carry on) if something needs a human decision: they say they're under 18, they have
   no licence but want to ride a motorbike, they ask for a disability accommodation, or anything else you
   shouldn't decide.
+- Once your call questions are done but chat items are still open, don't say goodbye: tell them you'll wait
+  while they fill the chat, and acknowledge each [chat] note as it comes. Only end early if they want to go
+  (the chat will continue without you).
 - When the app tells you everything is collected, thank them, say the team will contact them within 2 days,
-  and call end_call. If they hang up early, that's fine; the chat will continue.
+  and call end_call.
 
 Field notes:
 {field_notes}
@@ -71,7 +81,7 @@ def system_prompt(session: Session) -> str:
     notes = "\n".join(f"- {name}: {f.voice_hint}" for name, f in FIELDS.items())
     prompt = PERSONA.format(call_fields=", ".join(CALL_FIELDS), chat_fields=", ".join(CHAT_FIELDS), field_notes=notes)
     context = session.voice_context()
-    resumed = session.state.calls > 0 or session.state.transcript
+    resumed = session.state.calls > 0 or bool(session.state.observations)
     header = ("This is a RESUMED conversation; the caller already spoke with you or used the chat. Do not "
               "re-introduce the whole process or re-ask anything marked HAVE; pick up where things left off."
               if resumed else "This is the first contact.")
@@ -122,6 +132,10 @@ TOOLS = [
 ]
 
 
+def clean(text: str) -> str:
+    return re.sub(r"\s{2,}", " ", TOOL_LEAK.sub("", text)).strip()
+
+
 def rms(frame: bytes) -> float:
     samples = array.array("h", frame[: len(frame) - len(frame) % 2])
     if not samples:
@@ -165,7 +179,8 @@ class CallBridge:
     # main loop ---------------------------------------------------------------------------------------------
 
     async def run(self) -> None:
-        client = genai.Client(api_key=self.settings.gemini_api_key)
+        # google-genai 3.x defaults to API v1, where the Live endpoint 404s; Live is served on v1beta.
+        client = genai.Client(api_key=self.settings.gemini_api_key, http_options=types.HttpOptions(api_version="v1beta"))
         config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
             system_instruction=system_prompt(self.session),
@@ -191,7 +206,7 @@ class CallBridge:
                 self.registered = True
                 opener = ("[system] The call just connected. Greet the caller as Asha from Hunar, confirm they want to "
                           "apply for a delivery-partner job, and ask your first question.")
-                if self.session.state.calls > 1 or self.session.state.transcript:
+                if self.session.state.calls > 1 or self.session.state.observations:
                     opener = ("[system] The caller is back on a new call. Welcome them back in one sentence and continue "
                               "with what's still needed.")
                 await live.send_realtime_input(text=opener)
@@ -253,6 +268,7 @@ class CallBridge:
         if msg.usage_metadata:
             self._account(msg.usage_metadata)
         if msg.tool_call and msg.tool_call.function_calls:
+            self._close_user_line()
             responses = []
             for call in msg.tool_call.function_calls:
                 result = await self._run_tool(call.name, call.args or {})
@@ -289,6 +305,7 @@ class CallBridge:
     async def _on_agent_audio(self, data: bytes) -> None:
         now = time.monotonic()
         if not self.agent_speaking:
+            self._close_user_line()
             self.agent_speaking = True
             self.agent_turn_started = now
             self.agent_audio_s = 0.0
@@ -304,13 +321,14 @@ class CallBridge:
 
     async def _send_line(self, role: str, text: str, final: bool) -> None:
         n = self.user_line if role == "user" else self.agent_line
+        text = clean(text)
         await self._send({"type": "transcript", "role": role, "text": text.strip(), "final": final, "id": f"{self.call_id}-{role[0]}{n}"})
 
     def _close_user_line(self) -> None:
         if self.user_text.strip():
             text = self.user_text
             asyncio.create_task(self._send_line("user", text, final=True))
-            self.session.record_transcript("user", text)
+            self.session.record_transcript("user", clean(text))
             self.user_line += 1
         self.user_text = ""
 
@@ -318,7 +336,7 @@ class CallBridge:
         if self.agent_text.strip():
             text = self.agent_text + (" —" if interrupted else "")
             asyncio.create_task(self._send_line("agent", text, final=True))
-            self.session.record_transcript("agent", text)
+            self.session.record_transcript("agent", clean(text))
             self.agent_line += 1
         self.agent_text = ""
         if interrupted:

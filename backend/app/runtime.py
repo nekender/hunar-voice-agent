@@ -17,7 +17,7 @@ from fastapi import WebSocket
 
 from . import record as rec
 from . import validators as v
-from .scenario import CHAT_ORDER, FIELDS, Channel
+from .scenario import CHAT_FIELDS, CHAT_ORDER, FIELDS, Channel
 from .state import LICENCE_REJECT, SessionState
 from .files import FileStore
 from .store import Store
@@ -245,6 +245,12 @@ class Session:
             await self._resume_if_ended()
             if self.state.pending and self.state.pending["field"] == MODE_FIELD:
                 await self._close(self.state.pending["id"], cancel_reason="Call started.")
+            # Don't rely on the model to remember: the chat-only fields go to the chat as soon as the call starts,
+            # so the caller can fill them while talking. The model is told they're there.
+            todo = [n for n in CHAT_FIELDS if not self.state.is_settled(n) and n not in self.state.chat_queue]
+            if todo and not self.state.opted_out:
+                self.emit("chat_queued", {"fields": todo, "by": "call_start"})
+                await self._advance()
         if old:
             await old.hangup("replaced by a new call")
 

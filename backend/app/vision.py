@@ -36,7 +36,8 @@ class LicenceChecker:
     def __init__(self, settings: Settings, files: FileStore):
         self.settings = settings
         self.files = files
-        self.client = genai.Client(api_key=settings.gemini_api_key) if settings.gemini_api_key else None
+        self.client = (genai.Client(api_key=settings.gemini_api_key, http_options=types.HttpOptions(api_version="v1beta"))
+                       if settings.gemini_api_key else None)
 
     async def __call__(self, session_id: str, url: str) -> dict[str, Any]:
         path = self.files.path_for_url(session_id, url)
@@ -50,7 +51,7 @@ class LicenceChecker:
             contents=[types.Part.from_bytes(data=path.read_bytes(), mime_type=mime), PROMPT],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json", response_schema=SCHEMA, temperature=0,
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
+                thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL),
             ),
         )
         data = json.loads(resp.text or "{}")

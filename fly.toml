@@ -1,0 +1,39 @@
+# Fly.io: one machine with a volume for the SQLite event log + uploads.
+# Secrets: fly secrets set GEMINI_API_KEY=...   (never in this file)
+app = "hunar-delivery-agent"
+primary_region = "bom"
+
+[build]
+
+[env]
+  DATA_DIR = "/data"
+  RECORD_WEBHOOK_URL = "http://127.0.0.1:8080/sink/records"
+  INACTIVITY_SECONDS = "600"
+
+[[mounts]]
+  source = "agent_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Keep one machine up: sessions are finalized by an in-process sweeper, and calls must not hit a cold start.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 100
+    hard_limit = 200
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/healthz"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

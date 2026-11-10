@@ -16,7 +16,7 @@ def _float(name: str, default: float) -> float:
 class Settings:
     gemini_api_key: str = field(default_factory=lambda: os.environ.get("GEMINI_API_KEY", ""))
     live_model: str = field(default_factory=lambda: os.environ.get("LIVE_MODEL", "gemini-3.1-flash-live-preview"))
-    vision_model: str = field(default_factory=lambda: os.environ.get("VISION_MODEL", "gemini-2.5-flash-lite"))
+    vision_model: str = field(default_factory=lambda: os.environ.get("VISION_MODEL", "gemini-3.5-flash-lite"))
     voice_name: str = field(default_factory=lambda: os.environ.get("VOICE_NAME", "Kore"))
 
     data_dir: Path = field(default_factory=lambda: Path(os.environ.get("DATA_DIR", "./data")).resolve())

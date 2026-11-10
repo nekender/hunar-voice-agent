@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest
+pytest-asyncio
+pillow  # scripts/sim_call.py renders a synthetic licence
