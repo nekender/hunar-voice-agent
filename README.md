@@ -164,7 +164,7 @@ with built-in VAD, barge-in and transcription in both directions. Its input and 
 out) match the starter exactly, so there's no resampling. It speaks Hindi and Kannada and is among the cheapest
 realtime options. The browser only ever talks to my server, so the key never leaves it. A STT→LLM→TTS pipeline
 would give finer control and maybe lower cost, but needs much more work to get barge-in and latency right.
-**Cost per completed session: about $0.06** (measured: $0.055–0.069 over simulated sessions of 1.5–2 min). That's
+**Cost per completed session: about $0.06** (measured on production: mean $0.055, across simulated sessions of 1.5–2 min). That's
 summed from Gemini's per-turn `usage_metadata` by modality at list prices: audio $3/$12 per 1M tokens in/out,
 text $0.75/$4.50. The vision check adds well under $0.001. A long, meandering 6-minute real call cost $0.24,
 because Live re-bills the accumulated context every turn.
@@ -177,8 +177,8 @@ answering an injected chat note are excluded, since nobody spoke. `/api/metrics`
 
 | | p50 | p95 | turns |
 |---|---|---|---|
-| Local, simulated caller | 2.0 s | 4.0 s | 11 |
-| Local, real microphone call | 1.8 s | ~4.9 s | 20 |
+| **Production (Fly, Singapore), simulated caller** | **1.4 s** | **2.1 s** | 8 |
+| Local (India → Google), simulated caller | 2.0 s | 4.0 s | 11 |
 
 **Where the time goes:** turns that don't call a tool reply in about 1.1–1.3 s. Turns where the model first calls
 `save_field` wait for one tool round trip before speaking and take 1.9–2.5 s. I tried Live's `NON_BLOCKING`
@@ -289,7 +289,7 @@ cd backend && ../.venv/bin/uvicorn app.main:app --port 8080   # open http://loca
 ### Deploying (Fly.io)
 ```bash
 fly apps create hunar-delivery-agent
-fly volumes create agent_data --region bom --size 1 -a hunar-delivery-agent
+fly volumes create agent_data --region sin --size 1 -a hunar-delivery-agent
 fly secrets set GEMINI_API_KEY=... -a hunar-delivery-agent
 fly deploy
 ```

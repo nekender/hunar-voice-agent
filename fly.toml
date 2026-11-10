@@ -1,12 +1,13 @@
 # Fly.io: one machine with a volume for the SQLite event log + uploads.
 # Secrets: fly secrets set GEMINI_API_KEY=...   (never in this file)
 app = "hunar-delivery-agent"
-primary_region = "bom"
+primary_region = "sin"
 
 [build]
 
 [env]
   DATA_DIR = "/data"
+  PUBLIC_BASE_URL = "https://hunar-delivery-agent.fly.dev"
   RECORD_WEBHOOK_URL = "http://127.0.0.1:8080/sink/records"
   INACTIVITY_SECONDS = "600"
 

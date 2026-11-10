@@ -44,6 +44,11 @@ async def lifespan(app: FastAPI):
     if not settings.gemini_api_key:
         log.warning("GEMINI_API_KEY is not set: calls and licence checks are disabled")
     yield
+    # Graceful shutdown (deploy/restart): end live calls with an honest reason; the chat takes over on reconnect.
+    for session in list(hub.sessions.values()):
+        if session.call:
+            await session.call.hangup("server restart")
+    await asyncio.sleep(0.5)
     for t in tasks:
         t.cancel()
 
