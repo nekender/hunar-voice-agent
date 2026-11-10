@@ -258,6 +258,15 @@ class Session:
         if old:
             await old.hangup("replaced by a new call")
 
+    def detach_call(self, link: CallLink) -> None:
+        """Last-resort cleanup: forget a dead call even if recording its end failed, so the chat takes over
+        and the inactivity sweeper can still close the session."""
+        if self.call is link:
+            self.call = None
+        if self.state.active_call == link.call_id:
+            self.state.active_call = None
+            self.state.chat_mode = True
+
     async def call_ended(self, link: CallLink, seconds: float, reason: str) -> None:
         async with self.lock:
             if self.call is link:
@@ -328,16 +337,24 @@ class Session:
     def _still_needed(self) -> list[str]:
         return [n for n in FIELDS if not self.state.is_settled(n)]
 
+    def emit_soft(self, type_: str, data: dict[str, Any]) -> None:
+        """Bookkeeping writes (transcript lines, cost, latency, errors) must never take a live call down:
+        if the database hiccups, log it and keep talking. Field values and records use `emit` and do fail loudly."""
+        try:
+            self.emit(type_, data)
+        except Exception:
+            log.exception("could not persist %s event for session %s", type_, self.id)
+
     def record_transcript(self, role: str, text: str) -> None:
         if text.strip():
-            self.emit("transcript", {"role": role, "text": text.strip()})
+            self.emit_soft("transcript", {"role": role, "text": text.strip()})
 
     def record_cost(self, usd: float, detail: dict[str, Any]) -> None:
         if usd > 0:
-            self.emit("cost", {"usd": round(usd, 6), **detail})
+            self.emit_soft("cost", {"usd": round(usd, 6), **detail})
 
     def record_latency(self, ms: float) -> None:
-        self.emit("latency", {"ms": round(ms)})
+        self.emit_soft("latency", {"ms": round(ms)})
 
     # --- chat flow ---------------------------------------------------------------------------------------
 

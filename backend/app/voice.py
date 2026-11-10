@@ -229,11 +229,20 @@ class CallBridge:
         except Exception as exc:
             log.exception("live session failed")
             self.end_reason = f"voice provider error: {type(exc).__name__}"
-            self.session.emit("error", {"where": "voice", "message": str(exc)[:300]})
+            self.session.emit_soft("error", {"where": "voice", "message": str(exc)[:300]})
         finally:
-            self._finish_lines()
+            # Every step runs even if an earlier one fails: a call that ends without call_ended would leave the
+            # session believing it's still on a call (no chat takeover, no inactivity record).
+            try:
+                self._finish_lines()
+            except Exception:
+                log.exception("finishing transcript lines failed")
             if self.registered:
-                await self.session.call_ended(self, time.monotonic() - self.started, self.end_reason)
+                try:
+                    await self.session.call_ended(self, time.monotonic() - self.started, self.end_reason)
+                except Exception:
+                    log.exception("recording call end failed; detaching call")
+                    self.session.detach_call(self)
             try:
                 await self.ws.close(reason=self.end_reason[:120])
             except Exception:
@@ -259,7 +268,11 @@ class CallBridge:
             got_any = False
             async for msg in self.live.receive():
                 got_any = True
-                await self._on_message(msg)
+                try:
+                    await self._on_message(msg)
+                except Exception as exc:  # one bad message (or a DB blip) must not end the call
+                    log.exception("handling a live message failed; continuing")
+                    self.session.emit_soft("error", {"where": "voice:message", "message": f"{type(exc).__name__}: {str(exc)[:200]}"})
             if not got_any:
                 self.end_reason = "voice provider closed the session"
                 return
@@ -375,7 +388,7 @@ class CallBridge:
                     return {"ok": True}
         except Exception as exc:
             log.exception("tool %s failed", name)
-            self.session.emit("error", {"where": f"tool:{name}", "message": str(exc)[:300]})
+            self.session.emit_soft("error", {"where": f"tool:{name}", "message": str(exc)[:300]})
             return {"ok": False, "error": "internal error, carry on"}
         return {"ok": False, "error": f"unknown tool {name}"}
 
