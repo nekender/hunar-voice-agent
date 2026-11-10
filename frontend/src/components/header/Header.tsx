@@ -10,6 +10,14 @@ interface Props {
   onStop?: () => void;
 }
 
+/** Reload without ?sessionId so config.ts mints a new one; leaving the page closes the call and chat sockets. */
+function startNewSession(): void {
+  const params = new URLSearchParams(location.search);
+  params.delete("sessionId");
+  const query = params.toString();
+  location.assign(`${location.pathname}${query ? `?${query}` : ""}`);
+}
+
 export function Header({ call, notice, onCall, onStop }: Props) {
   const inCall = isInCall(call.state);
   return (
@@ -23,6 +31,16 @@ export function Header({ call, notice, onCall, onStop }: Props) {
             {call.connectedAt !== null && <CallTimer since={call.connectedAt} />}
           </span>
         </div>
+        <button
+          className="stop-btn"
+          type="button"
+          title="Start a new application (this one stays saved at its link)"
+          onClick={() => {
+            if (confirm("Start a new application? This one stays saved at its current link.")) startNewSession();
+          }}
+        >
+          New
+        </button>
         {onStop && (
           <button
             className="stop-btn"
