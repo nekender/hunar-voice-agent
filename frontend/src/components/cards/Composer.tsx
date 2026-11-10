@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useFocusOnOpen } from "../../hooks/useFocusOnOpen";
-import { fileAnswer, textAnswer } from "../../lib/answers";
+import { fileAnswer, SKIPPED_DISPLAY, textAnswer } from "../../lib/answers";
 import { prefillFileInput } from "../../lib/files";
 import { INPUT_TYPES, inputId } from "../../lib/inputs";
 import { InputKind } from "../../protocol";
@@ -63,6 +63,15 @@ export function Composer({ card, onAnswer }: Props) {
             value={text}
             onChange={(event) => setText(event.target.value)}
           />
+        )}
+        {!spec.required && (
+          <button
+            type="button"
+            className="skip-btn"
+            onClick={() => onAnswer({ value: null, files: [], display: SKIPPED_DISPLAY })}
+          >
+            Skip
+          </button>
         )}
         <SendButton />
       </div>

@@ -129,7 +129,11 @@ class SessionState:
                     self.pending = None
             case "chat_queued":
                 for name in d["fields"]:
-                    if name not in self.chat_queue:
+                    if d.get("front"):
+                        if name in self.chat_queue:
+                            self.chat_queue.remove(name)
+                        self.chat_queue.insert(0, name)
+                    elif name not in self.chat_queue:
                         self.chat_queue.append(name)
             case "chat_mode_entered":
                 self.chat_mode = True

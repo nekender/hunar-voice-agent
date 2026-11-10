@@ -53,7 +53,8 @@ What you must collect:
   as the call started. In your first turn, tell them a few short things are waiting in their chat to fill
   whenever convenient while you keep talking. Use request_in_chat only to re-send something. Never ask them to
   read their Aadhaar number aloud; if they start reading out an ID, gently point them to the chat instead.
-- alternatePhone is optional; it's sent to the chat, skipping is fine.
+- alternatePhone is optional; it's sent to the chat. If the caller says to skip it, call save_field with value
+  'skip' (that removes the card); never just say "we can skip" without calling it.
 
 Rules:
 - Never say tool names, field names or anything in braces out loud.
@@ -93,7 +94,8 @@ TOOLS = [
         "function_declarations": [
             {
                 "name": "save_field",
-                "description": "Save a value the caller gave on the call. The server validates and normalizes it.",
+                "description": "Save a value the caller gave on the call. The server validates and normalizes it. "
+                               "For an optional field the caller declines (e.g. alternatePhone), pass value 'skip'.",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
@@ -124,8 +126,11 @@ TOOLS = [
             },
             {
                 "name": "end_call",
-                "description": "Hang up after your goodbye has been spoken.",
-                "parameters": {"type": "OBJECT", "properties": {"reason": {"type": "STRING"}}},
+                "description": "Hang up after your goodbye. Refused while required fields are missing, unless the caller wants to leave.",
+                "parameters": {"type": "OBJECT", "properties": {
+                    "reason": {"type": "STRING"},
+                    "callerWantsToLeave": {"type": "BOOLEAN", "description": "true only if the caller said they need to go"},
+                }},
             },
         ]
     }
@@ -384,6 +389,9 @@ class CallBridge:
                     await self.session.opt_out("call", str(args.get("reason") or "asked to stop on the call"))
                     return {"ok": True, "next": "Say a short goodbye, then call end_call."}
                 case "end_call":
+                    refusal = self.session.voice_may_hang_up(bool(args.get("callerWantsToLeave")))
+                    if refusal:
+                        return refusal
                     self.ending = True
                     self.end_reason = f"agent ended the call: {args.get('reason') or 'done'}"
                     if not self.agent_speaking:

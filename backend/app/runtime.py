@@ -25,6 +25,7 @@ from .store import Store
 log = logging.getLogger("runtime")
 
 MODE_FIELD = "_mode"  # pseudo-field for the "continue by chat instead?" card shown before any call
+SKIP_WORDS = {"skip", "skipped", "none", "no", "n/a", "na", "nahi", "don't have", "dont have"}  # optional fields, by voice
 
 
 class CallLink(Protocol):
@@ -174,6 +175,8 @@ class Session:
         pending = self.state.pending
         if pending and pending["field"] == field:
             await self.chat_input(pending["id"], field, value)
+            if not (self.state.pending and self.state.pending["id"] == pending["id"]):
+                await self.send_chat({"type": "inputCancel", "requestId": pending["id"], "reason": "Answered via the API."})
         else:
             async with self.lock:
                 await self._resume_if_ended()
@@ -292,12 +295,26 @@ class Session:
             return {"ok": False, "error": f"Unknown field {field}. Valid: {', '.join(FIELDS)}"}
         async with self.lock:
             await self._resume_if_ended()
+            if not FIELDS[field].required and str(value).strip().lower() in SKIP_WORDS:
+                self.emit("field_skipped", {"field": field, "source": "call"})
+                await self._advance()  # withdraws its open chat card
+                return {"ok": True, "skipped": field, "stillNeeded": self._still_needed()}
             result = self._validate(field, value)
             self._observe(field, value, result, Channel.CALL, self._display(field, value, result))
             if isinstance(result, v.Invalid):
                 return {"ok": False, "error": result.reason}
             await self._advance()
             return {"ok": True, "saved": result.value, "stillNeeded": self._still_needed()}
+
+    def voice_may_hang_up(self, caller_wants_to_leave: bool) -> dict[str, Any] | None:
+        """The model sometimes says goodbye too early. The server, not the prompt, decides: while required fields
+        are missing, the agent stays on the line unless the caller wants to go (or opted out)."""
+        missing = self.state.missing_required()
+        if missing and not caller_wants_to_leave and not self.state.opted_out:
+            return {"ok": False, "error": f"Don't hang up yet: still waiting for {', '.join(missing)}. Stay on the "
+                    "line and help the caller with the chat; only end if they say they want to go "
+                    "(then call end_call with callerWantsToLeave=true)."}
+        return None
 
     async def voice_request_in_chat(self, fields: list[str]) -> dict[str, Any]:
         async with self.lock:
@@ -386,8 +403,14 @@ class Session:
             return
         pending = state.pending
         if pending:
-            if pending["field"] != MODE_FIELD and state.is_settled(pending["field"]):
+            open_field = pending["field"]
+            waiting_required = [f for f in state.chat_queue if FIELDS[f].required and not state.is_settled(f)]
+            if open_field != MODE_FIELD and state.is_settled(open_field):
                 await self._close(pending["id"], cancel_reason="Already have this one.")
+            elif open_field != MODE_FIELD and not FIELDS[open_field].required and waiting_required:
+                # Never let an optional question block a required one (e.g. a licence re-upload).
+                await self._close(pending["id"], cancel_reason="We'll come back to this one.")
+                self.emit("chat_queued", {"fields": [open_field]})
             else:
                 return
         if self.call and not state.missing_required():
@@ -466,7 +489,7 @@ class Session:
                 msg = verdict.get("detail") or "That doesn't look like a clear driving licence."
                 await self.say_in_chat(f"{msg} Could you upload it again?")
                 await self.tell_call(f"[chat] The licence upload was rejected ({msg}). The user has been asked to re-upload; mention it briefly.")
-                self.emit("chat_queued", {"fields": ["drivingLicence"]})
+                self.emit("chat_queued", {"fields": ["drivingLicence"], "front": True})
             await self._advance()
 
 
