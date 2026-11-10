@@ -8,7 +8,7 @@ from typing import Any
 from google import genai
 from google.genai import types
 
-from .files import MIME, FileStore
+from .files import FileStore
 from .settings import Settings
 
 log = logging.getLogger("vision")
@@ -40,15 +40,15 @@ class LicenceChecker:
                        if settings.gemini_api_key else None)
 
     async def __call__(self, session_id: str, url: str) -> dict[str, Any]:
-        path = self.files.path_for_url(session_id, url)
-        if path is None:
+        found = self.files.get_for_url(session_id, url)
+        if found is None:
             return {"verdict": "not_licence", "detail": "The uploaded file could not be found."}
         if self.client is None:
             return {"verdict": "unchecked", "detail": "vision check disabled"}
-        mime = MIME.get(path.suffix.lstrip("."), "image/jpeg")
+        mime, data = found
         resp = await self.client.aio.models.generate_content(
             model=self.settings.vision_model,
-            contents=[types.Part.from_bytes(data=path.read_bytes(), mime_type=mime), PROMPT],
+            contents=[types.Part.from_bytes(data=data, mime_type=mime), PROMPT],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json", response_schema=SCHEMA, temperature=0,
                 thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL),

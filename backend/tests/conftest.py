@@ -1,6 +1,8 @@
 import base64
 import importlib
+import os
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -29,9 +31,16 @@ VALID_AADHAAR = aadhaar_with_check("23456789012")
 
 @pytest.fixture
 def make_app(tmp_path, monkeypatch):
-    """Build a fresh app bound to a temp data dir; calling it again simulates a server restart."""
+    """Build a fresh app bound to a temp data dir; calling it again simulates a server restart.
+
+    With TEST_DATABASE_URL set, the same tests run against Postgres, each in its own throwaway schema.
+    """
+    pg_url = os.environ.get("TEST_DATABASE_URL", "")
+    schema = f"test_{uuid.uuid4().hex[:10]}"
 
     def build():
+        monkeypatch.setenv("DATABASE_URL", pg_url)
+        monkeypatch.setenv("DB_SCHEMA", schema if pg_url else "")
         monkeypatch.setenv("DATA_DIR", str(tmp_path))
         monkeypatch.setenv("GEMINI_API_KEY", "")
         monkeypatch.setenv("RECORD_WEBHOOK_URL", "")
@@ -40,4 +49,9 @@ def make_app(tmp_path, monkeypatch):
         main = importlib.import_module("app.main")
         return main.app
 
-    return build
+    yield build
+    if pg_url:
+        import psycopg
+
+        with psycopg.connect(pg_url, autocommit=True) as conn:
+            conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')

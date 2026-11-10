@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -36,8 +36,8 @@ FRONTEND = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    store = Store(settings.db_path)
-    files = FileStore(settings)
+    store = Store(settings.db_path, settings.database_url, settings.db_schema)
+    files = FileStore(settings, store)
     hub = Hub(store, LicenceChecker(settings, files), files)
     app.state.hub = hub
     tasks = [asyncio.create_task(delivery_loop(hub, settings)), asyncio.create_task(sweeper_loop(hub, settings))]
@@ -51,6 +51,7 @@ async def lifespan(app: FastAPI):
     await asyncio.sleep(0.5)
     for t in tasks:
         t.cancel()
+    store.close()
 
 
 app = FastAPI(title="Hunar delivery-partner voice + chat agent", lifespan=lifespan)
@@ -152,10 +153,11 @@ async def download(session_id: str, name: str, request: Request, exp: int = 0, s
     files = hub_of(request).files
     if not files.verify(session_id, name, exp, sig):
         raise HTTPException(403, "link expired or invalid")
-    path = files.path(session_id, name)
-    if not path:
+    found = files.get(session_id, name)
+    if not found:
         raise HTTPException(404)
-    return FileResponse(path)
+    mime, data = found
+    return Response(data, media_type=mime, headers={"Cache-Control": "private, no-store"})
 
 
 # --- HTTP access for testing + debuggability ------------------------------------------------------------------

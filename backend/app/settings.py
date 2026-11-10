@@ -19,6 +19,9 @@ class Settings:
     vision_model: str = field(default_factory=lambda: os.environ.get("VISION_MODEL", "gemini-3.5-flash-lite"))
     voice_name: str = field(default_factory=lambda: os.environ.get("VOICE_NAME", "Kore"))
 
+    # Postgres (e.g. Neon) when set; otherwise SQLite under data_dir. DB_SCHEMA isolates test runs.
+    database_url: str = field(default_factory=lambda: os.environ.get("DATABASE_URL", ""))
+    db_schema: str = field(default_factory=lambda: os.environ.get("DB_SCHEMA", ""))
     data_dir: Path = field(default_factory=lambda: Path(os.environ.get("DATA_DIR", "./data")).resolve())
     public_base_url: str = field(default_factory=lambda: os.environ.get("PUBLIC_BASE_URL", "").rstrip("/"))
 
@@ -46,9 +49,6 @@ class Settings:
     def db_path(self) -> Path:
         return self.data_dir / "app.db"
 
-    @property
-    def upload_dir(self) -> Path:
-        return self.data_dir / "uploads"
 
 
 settings = Settings()

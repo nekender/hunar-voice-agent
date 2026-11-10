@@ -4,3 +4,5 @@ google-genai==3.0.0
 httpx==0.28.1
 python-multipart==0.0.33
 websockets==17.4
+psycopg[binary]==3.3.8
+psycopg-pool==3.3.3

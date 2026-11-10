@@ -1,14 +1,14 @@
-"""Upload storage. Files live on the server's volume; the record carries HMAC-signed, expiring links to them
-(the URLs point at ID documents, so they must not be guessable or permanent)."""
+"""Uploads. Files are stored in the database (the app host has no persistent disk); the record carries HMAC-signed,
+expiring links to them, because the URLs point at ID documents and must not be guessable or permanent."""
 
 import hashlib
 import hmac
 import secrets
 import time
 import uuid
-from pathlib import Path
 
 from .settings import Settings
+from .store import Store
 
 # Magic-byte sniffing: never trust the browser's Content-Type or file name.
 SIGNATURES: list[tuple[bytes, int, str]] = [
@@ -32,15 +32,12 @@ def sniff(head: bytes) -> str | None:
 
 
 class FileStore:
-    def __init__(self, settings: Settings):
-        self.root = settings.upload_dir
-        self.root.mkdir(parents=True, exist_ok=True)
+    def __init__(self, settings: Settings, store: Store):
+        self.store = store
         self.max_bytes = settings.max_upload_bytes
         self.base_url = settings.public_base_url
-        key_file = settings.data_dir / "signing.key"
-        if not key_file.exists():  # generated on the volume, never in the repo
-            key_file.write_bytes(secrets.token_bytes(32))
-        self.key = key_file.read_bytes()
+        # Generated once and kept in the database (never in the repo), so links survive restarts and redeploys.
+        self.key = store.get_or_create_blob("file-signing-key", lambda: secrets.token_bytes(32))
 
     def save(self, session_id: str, data: bytes) -> str:
         """Returns the file name. Raises ValueError with a user-facing message."""
@@ -49,23 +46,24 @@ class FileStore:
         ext = sniff(data[:16])
         if not ext:
             raise ValueError("Only JPG, PNG, WEBP, HEIC images or PDF files are accepted.")
-        folder = self.root / session_id
-        folder.mkdir(parents=True, exist_ok=True)
         name = f"{uuid.uuid4().hex}.{ext}"
-        (folder / name).write_bytes(data)
+        self.store.put_file(session_id, name, MIME[ext], data)
         return name
 
-    def path(self, session_id: str, name: str) -> Path | None:
-        candidate = (self.root / session_id / name).resolve()
-        if candidate.parent != (self.root / session_id).resolve() or not candidate.is_file():
-            return None
-        return candidate
+    def get(self, session_id: str, name: str) -> tuple[str, bytes] | None:
+        return self.store.get_file(session_id, name)
 
-    def path_for_url(self, session_id: str, url: str) -> Path | None:
+    @staticmethod
+    def name_from_url(session_id: str, url: str) -> str | None:
         prefix = f"/sessions/{session_id}/files/"
-        if prefix not in url:
-            return None
-        return self.path(session_id, url.split(prefix, 1)[1].split("?", 1)[0])
+        return url.split(prefix, 1)[1].split("?", 1)[0] if prefix in url else None
+
+    def get_for_url(self, session_id: str, url: str) -> tuple[str, bytes] | None:
+        name = self.name_from_url(session_id, url)
+        return self.get(session_id, name) if name else None
+
+    def exists_for_url(self, session_id: str, url: str) -> bool:
+        return self.get_for_url(session_id, url) is not None
 
     def canonical_url(self, base: str, session_id: str, name: str) -> str:
         return f"{self.base_url or base.rstrip('/')}/sessions/{session_id}/files/{name}"

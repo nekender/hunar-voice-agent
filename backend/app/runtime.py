@@ -190,7 +190,7 @@ class Session:
     def _validate(self, field: str, value: Any) -> v.Result:
         """The one place every channel's values pass through."""
         result = FIELDS[field].validate(value)
-        if FIELDS[field].kind == "file" and isinstance(result, v.Ok) and not self.hub.files.path_for_url(self.id, result.value):
+        if FIELDS[field].kind == "file" and isinstance(result, v.Ok) and not self.hub.files.exists_for_url(self.id, result.value):
             return v.Invalid("Upload not found for this session; please attach the file again.")
         return result
 
