@@ -5,7 +5,7 @@ vehicle. **In the chat on the same page** they type or upload the things that ar
 Aadhaar, bank IFSC, vehicle type and a licence photo. Both channels share one session. Every session ends in a
 single sanitized, versioned record that is POSTed to a receiving endpoint.
 
-- **Live app:** `https://hunar-delivery-agent.fly.dev` (each page load is a new session; add `?sessionId=…` to resume one)
+- **Live app:** `https://<hf-user>-hunar-delivery-agent.hf.space` (each page load is a new session; add `?sessionId=…` to resume one)
 - **Session timeline (debug view):** `/debug/<sessionId>`
 - **Received records (stub "other service"):** `/sink/records`
 - **Metrics:** `/api/metrics` (p50/p95 latency, cost per completed session)
@@ -52,7 +52,8 @@ Use headphones on the call. Browser echo cancellation is best-effort.
    ├─ vision.LicenceChecker ── gemini-3.5-flash-lite (structured JSON)
    └─ workers: outbox delivery (retry with backoff) · inactivity sweeper
    ▼
- SQLite (WAL) on a Fly volume: sessions · events (append-only) · records (outbox) · sink
+ Postgres (Neon, us-east-1): sessions · events (append-only) · records (outbox) · sink · files (uploads)
+ (SQLite with the same SQL when DATABASE_URL is unset: local runs and tests)
 ```
 
 ### How the two channels share state
@@ -143,7 +144,7 @@ and finishes, or an opted-out user starts answering again (which clears the opt-
 `revision: n+1` with `supersedes: n`. An unchanged session never produces a new revision, however many times the
 producer runs.
 
-**Delivery.** The record is written to `records` **in the same SQLite transaction** as its `record_produced`
+**Delivery.** The record is written to `records` **in the same database transaction** as its `record_produced`
 event (primary key `(sessionId, revision)`), then sent by an outbox worker as a `POST` to `RECORD_WEBHOOK_URL`
 with `Idempotency-Key: <sessionId>:<revision>`. Failures retry with exponential backoff up to 10 minutes. The
 built-in receiver `/sink/records` dedupes on that key, and records are also logged as `RECORD {...}` lines.
@@ -177,7 +178,7 @@ answering an injected chat note are excluded, since nobody spoke. `/api/metrics`
 
 | | p50 | p95 | turns |
 |---|---|---|---|
-| **Production (Fly, Singapore), simulated caller** | **1.4 s** | **2.1 s** | 8 |
+| Earlier deploy (Fly.io, Singapore), simulated caller | 1.4 s | 2.1 s | 8 |
 | Local (India → Google), simulated caller | 2.0 s | 4.0 s | 11 |
 
 **Where the time goes:** turns that don't call a tool reply in about 1.1–1.3 s. Turns where the model first calls
@@ -223,7 +224,9 @@ mic frames, answers the chat cards, and prints the transcript, record, latencies
 
 **Not handled / known limitations**
 - **Single instance only.** Live sockets and per-session locks live in one process. Scaling out needs sticky
-  routing by `sessionId` (e.g. Fly `fly-replay`) or Postgres advisory locks.
+  routing by `sessionId` or Postgres advisory locks.
+- **Database calls are synchronous** (a few ms each to Neon in the same region). That's fine for this load, but the
+  first query after Neon's idle auto-suspend takes about 1 s while compute wakes.
 - **Speech recognition on Indian place names.** "Koramangala" was once transcribed as "Mangala". The agent reads
   values back, but a misheard area the caller doesn't correct goes into the record. A locality autocomplete in chat would fix it.
 - Echo without headphones can make the agent hear itself; this relies on browser AEC.
@@ -270,7 +273,8 @@ cp .env.example .env            # put GEMINI_API_KEY in .env (gitignored, server
 set -a && . ./.env && set +a
 cd backend && ../.venv/bin/uvicorn app.main:app --port 8080   # open http://localhost:8080
 ```
-- **Tests:** `cd backend && ../.venv/bin/python -m pytest` (31 tests, no network or API key needed)
+- **Tests:** `cd backend && ../.venv/bin/python -m pytest` (31 tests, no network or API key needed). Set
+  `TEST_DATABASE_URL` to run the same end-to-end tests against Postgres, each in a throwaway schema (all pass on Neon).
 - **Simulated call:** `.venv/bin/python scripts/sim_call.py --server http://localhost:8080 [--lang hi]`
 - **Frontend dev with hot reload:** `cd frontend && VITE_SERVER_URL=http://localhost:8080 npm run dev`
 
@@ -286,20 +290,24 @@ cd backend && ../.venv/bin/uvicorn app.main:app --port 8080   # open http://loca
 | `GET /api/metrics` | latency p50/p95, cost per completed session |
 | `GET /sink/records` | what the receiving service got |
 
-### Deploying (Fly.io)
+### Deploying (free: Hugging Face Spaces + Neon)
+The app host is a **Hugging Face Docker Space** (free, HTTPS, WebSockets; it only sleeps after ~48 h without
+traffic). It has no persistent disk, so **all state lives in Neon Postgres** (free tier, same AWS region). That
+covers the event log, record outbox, uploaded files and the link-signing key, which makes a Space restart or
+redeploy lossless by construction.
 ```bash
-fly apps create hunar-delivery-agent
-fly volumes create agent_data --region sin --size 1 -a hunar-delivery-agent
-fly secrets set GEMINI_API_KEY=... -a hunar-delivery-agent
-fly deploy
+# .env: GEMINI_API_KEY, DATABASE_URL (Neon, direct, non-pooled host), HF_TOKEN (write)
+set -a && . ./.env && set +a
+.venv/bin/python scripts/deploy_hf.py      # creates the Space, sets secrets, uploads git-tracked files
 ```
+`fly.toml` is kept for an alternative Fly.io deploy (one machine + volume, no DATABASE_URL needed).
 
 ### Code map
 ```
 backend/app/
   scenario.py    the fields: channel, validator, chat card shape, voice hint (single source of truth)
   validators.py  pure validation + normalization (Verhoeff, IFSC, phone, …)
-  store.py       SQLite: events, sessions, records outbox, sink
+  store.py       Postgres/SQLite: events, sessions, records outbox, sink, files
   state.py       fold events → state; resolution, conflicts, review reasons
   record.py      outcome rules, sanitized record, fingerprint
   runtime.py     per-session orchestrator: chat flow, voice tool handlers, finalize
